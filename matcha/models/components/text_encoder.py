@@ -178,6 +178,7 @@ class MultiHeadAttention(nn.Module):
         channels,
         out_channels,
         n_heads,
+        layer_num,
         heads_share=True,
         p_dropout=0.0,
         proximal_bias=False,
@@ -205,7 +206,12 @@ class MultiHeadAttention(nn.Module):
 
         self.conv_o = torch.nn.Conv1d(channels, out_channels, 1)
         self.drop = torch.nn.Dropout(p_dropout)
-        self.lambda_param = nn.Parameter(torch.tensor(0.5))
+        self.lambda_init = 0.8 - 0.6 * math.exp(-0.3 * (layer_num - 1))
+        self.lambda_q1 = nn.Parameter(torch.normal(mean=0, std=0.1, size=(self.k_channels,)))
+        self.lambda_q2 = nn.Parameter(torch.normal(mean=0, std=0.1, size=(self.k_channels,)))
+        self.lambda_k1 = nn.Parameter(torch.normal(mean=0, std=0.1, size=(self.k_channels,)))
+        self.lambda_k2 = nn.Parameter(torch.normal(mean=0, std=0.1, size=(self.k_channels,)))
+
 
         torch.nn.init.xavier_uniform_(self.conv_q.weight)
         torch.nn.init.xavier_uniform_(self.conv_k.weight)
@@ -251,7 +257,12 @@ class MultiHeadAttention(nn.Module):
             scores_2 = scores_2.masked_fill(mask == 0, -1e4)
         p_attn_1 = torch.nn.functional.softmax(scores_1, dim=-1)
         p_attn_2 = torch.nn.functional.softmax(scores_2, dim=-1)
-        p_attn = p_attn_1 - self.lambda_param * p_attn_2
+        lambda_ = (
+            torch.exp(self.lambda_q1 * self.lambda_k1)
+            - torch.exp(self.lambda_q2 * self.lambda_k2)
+            + self.lambda_init
+        )
+        p_attn = p_attn_1 - lambda_ * p_attn_2
         p_attn = self.drop(p_attn)
         output = torch.matmul(p_attn, value)
         output = output.transpose(2, 3).contiguous().view(b, d, t_t)
@@ -309,8 +320,8 @@ class Encoder(nn.Module):
         self.norm_layers_1 = torch.nn.ModuleList()
         self.ffn_layers = torch.nn.ModuleList()
         self.norm_layers_2 = torch.nn.ModuleList()
-        for _ in range(self.n_layers):
-            self.attn_layers.append(MultiHeadAttention(hidden_channels, hidden_channels, n_heads, p_dropout=p_dropout))
+        for i in range(self.n_layers):
+            self.attn_layers.append(MultiHeadAttention(hidden_channels, hidden_channels, n_heads, i, p_dropout=p_dropout))
             self.norm_layers_1.append(LayerNorm(hidden_channels))
             self.ffn_layers.append(
                 FFN(
