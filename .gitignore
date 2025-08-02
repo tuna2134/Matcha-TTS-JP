@@ -146,7 +146,9 @@ dmypy.json
 
 # Lightning-Hydra-Template
 configs/local/default.yaml
-/data/
+data/*
+!data/.gitkeep
+!data/convert.*
 /logs/
 .env
 
@@ -162,3 +164,5 @@ g_02500000
 gradio_cached_examples/
 synth_output/
 /data
+*.sh
+*.onnx
